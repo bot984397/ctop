@@ -196,9 +196,18 @@ namespace Input {
          return std::nullopt;
       }
       std::string_view key(input);
-
+    
+      if (escape_chars.find(std::string(key)) != escape_chars.end()) {
+         return KeyEvent {
+            .type = EventType::Spec,
+            .ch = 0x00,
+            .escape = escape_chars.at(std::string(key)),
+            .mouse = {}
+         };
+      }
+    
       if (key.starts_with("\x1b[")) {
-         key.remove_prefix(2); 
+         key.remove_prefix(1);
          if (key.starts_with("[<")) {
             try {
                MouseEvent ev = parse_mouse_event(std::string{key});
@@ -212,7 +221,6 @@ namespace Input {
                return std::nullopt;
             }
          }
-
          if (escape_chars.find(std::string(key)) != escape_chars.end()) {
             return KeyEvent {
                .type = EventType::Spec,
@@ -222,34 +230,20 @@ namespace Input {
             };
          }
       }
-
+    
       if (key.length() == 1) {
          unsigned char first = static_cast<unsigned char>(key[0]);
-         if (first >= 32 && first < 127) {
+         if (first < 127) {  // Allow control characters but still filter out extended ASCII
             return KeyEvent {
-               .type = EventType::Char,
+               .type = first < 32 ? EventType::Spec : EventType::Char,
                .ch = first,
-               .escape = EscapeCodes::NONE,
+               .escape = first < 32 ? EscapeCodes::CTRL : EscapeCodes::NONE,
                .mouse = {}
             };
          }
       }
+    
       return std::nullopt;
-
-
-         /*if (g_CfgMgr.get<bool>("proc_filtering").v()) {
-				if (mouse_event == "mouse_click") return mouse_event;
-				else return "";
-			}*/
-
-			//? Get column and line position of mouse and check for any actions mapped to current position
-			/*for (const auto& [mapped_key, pos] : (Menu::active ? Menu::mouse_mappings : mouse_mappings)) {
-				if (col >= pos.col and col < pos.col + pos.width and line >= pos.line and line < pos.line + pos.height) {
-					key = mapped_key;
-					break;
-				}
-			}*/
-
    }
 
    /// TODO: Figure out where this shit's actually called, if at all
@@ -266,8 +260,54 @@ namespace Input {
 		// do not need it, actually
 	}
 
-	void process(std::optional<KeyEvent> key) {
-      if (!key.has_value()) return;
+   void process_char(KeyEvent ev) {
+      std::ofstream outfile;
+      outfile.open("debug.log", std::ios_base::app); 
+      outfile << "[CHAR] " << ev.ch << std::endl;
+      outfile.close();
+
+      switch (ev.ch) {
+      case 'm':
+
+      case 'q':
+         clean_quit(0);
+         break;
+      }
+   }
+
+   void process_special(KeyEvent ev) {
+      std::ofstream outfile;
+      outfile.open("debug.log", std::ios_base::app);
+
+      outfile << "[SPEC] " << ev.escape << std::endl;
+      outfile.close();
+   }
+
+   void process_mouse(KeyEvent ev) {
+      std::ofstream outfile;
+      outfile.open("debug.log", std::ios_base::app);
+
+      outfile << "[MOUSE] " << ev.mouse.x << ":" << ev.mouse.y << " button: " << ev.mouse.button << " pressed: " << ev.mouse.pressed << std::endl;
+      outfile.close();
+   }
+
+	void process(std::optional<KeyEvent> ev_opt) {
+      if (!ev_opt) return;
+      auto ev = *ev_opt;
+
+      switch (ev.type) {
+         case EventType::Char:
+            process_char(ev);
+            break;
+         case EventType::Spec:
+            process_special(ev);
+            break;
+         case EventType::Mouse:
+            process_mouse(ev);
+            break;
+         default:
+            break;
+      }
 
 		//if (key.empty()) return;
       

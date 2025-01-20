@@ -58,6 +58,7 @@ add_executable(btop
   src/btop_shared.cpp
   src/btop_theme.cpp
   src/btop_tools.cpp
+  src/process.cpp
 )
 
 if(APPLE)

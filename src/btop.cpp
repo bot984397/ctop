@@ -55,6 +55,7 @@ tab-size = 4
 #include "config.h"
 #include "fmt/core.h"
 #include "fmt/ostream.h"
+#include "aggregator.h"
 
 using std::atomic;
 using std::cout;
@@ -928,6 +929,13 @@ int main(int argc, char **argv) {
 
    g_CfgMgr.set<CfgI>("update_ms", 300);
 	//? ------------------------------------------------ INIT ---------------------------------------------------------
+   
+   auto aggr = ProcessAggregator();   
+   aggr.aggregate();
+   //return 0;
+
+
+
    
 	Global::start_time = time_s();
 

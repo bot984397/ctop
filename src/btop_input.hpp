@@ -24,6 +24,7 @@ tab-size = 4
 #include <unordered_map>
 #include <optional>
 #include <deque>
+#include <fstream>
 
 using std::array;
 using std::atomic;

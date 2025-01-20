@@ -105,17 +105,6 @@ public:
    }
 };
 
-class ProcessAggregator {
-private:
-   int proc_last_selected;
-   int proc_selected;
-   int detailed_pid;
-   int selected_pid;
-   bool show_detailed;
-   string proc_filter;
-   bool proc_filtering;
-};
-
 /////////////// OLD SHIT (YUCKERS) ////////////////////////////////////////////
 
 namespace Global {
@@ -151,6 +140,10 @@ namespace Runner {
 namespace Tools {
 	//* Platform specific function for system_uptime (seconds since last restart)
 	double system_uptime();
+
+   //bool file_readable(std::string path) {
+   //   return 
+   //}
 }
 
 namespace Shared {
