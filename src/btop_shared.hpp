@@ -24,9 +24,11 @@ tab-size = 4
 #include <filesystem>
 #include <string>
 #include <tuple>
+#include <variant>
 #include <vector>
 #include <unordered_map>
 #include <unistd.h>
+#include <iostream>
 
 // From `man 3 getifaddrs`: <net/if.h> must be included before <ifaddrs.h>
 // clang-format off
@@ -52,26 +54,69 @@ void banner_gen();
 
 extern void clean_quit(int sig);
 
-/// TEMPORARILY PLACED HERE, WILL BE MOVED LATER
-/*
-enum TempScale {
-   Celsius = 0,
-   Fahrenheit,
-   Kelvin,
-   Rankine,
+class Error {
+private:
+   std::string message;
+public:
+   explicit Error(std::string err) : message(std::move(err)) {}
+   const std::string& what() const { return message; }
 };
 
-struct TempScaleMap : public std::map<std::string, TempScale>
-{
-   TempScaleMap() {
-      this->operator[]("celsius") = Celsius;
-      this->operator[]("fahrenheit") = Fahrenheit;
-      this->operator[]("kelvin") = Kelvin;
-      this->operator[]("rankine") = Rankine;
-   };
-   ~TempScaleMap(){}
-}
-*/
+template<typename T>
+class DynResult {
+private:
+   std::variant<T, Error> result;
+public:
+   explicit DynResult(T value) : result(std::move(value)) {}
+   explicit DynResult(Error error) : result(std::move(error)) {}
+
+   static DynResult Err(std::string err) {
+      return DynResult(Error(std::move(err)));
+   }
+
+   bool is_ok() const { return std::holds_alternative<T>(result); }
+   bool is_err() const { return std::holds_alternative<Error>(result); }
+
+   const T& v() const {
+      if (is_err()) { 
+         throw std::runtime_error("Tried to get value from error result: " + e());
+      }
+      return std::get<T>(result);
+   }
+
+   const std::string& e() const {
+      if (!is_err()) {
+         throw std::runtime_error("Tried to get error from success result");
+      }
+      return std::get<Error>(result).what();
+   }
+
+   T v_or(T def) const {
+      if (is_err()) return def;
+      return std::get<T>(result);
+   }
+   
+   template<typename F>
+   auto and_then(F&& f) const -> std::invoke_result_t<F, T> {
+      if (is_err()) {
+         return std::invoke_result_t<F, T>(std::get<Error>(result));
+      }
+      return f(std::get<T>(result));
+   }
+};
+
+class ProcessAggregator {
+private:
+   int proc_last_selected;
+   int proc_selected;
+   int detailed_pid;
+   int selected_pid;
+   bool show_detailed;
+   string proc_filter;
+   bool proc_filtering;
+};
+
+/////////////// OLD SHIT (YUCKERS) ////////////////////////////////////////////
 
 namespace Global {
 	extern const vector<array<string, 2>> Banner_src;

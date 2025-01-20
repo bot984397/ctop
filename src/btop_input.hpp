@@ -22,12 +22,78 @@ tab-size = 4
 #include <atomic>
 #include <array>
 #include <unordered_map>
+#include <optional>
 #include <deque>
 
 using std::array;
 using std::atomic;
 using std::deque;
 using std::string;
+
+////////////////////////// REWRITE ////////////////////////////////////////////
+
+enum EscapeCodes {
+   NONE,
+   AR_UP,
+   AR_DOWN,
+   AR_LEFT,
+   AR_RIGHT,
+   INSERT,
+   DELETE,
+   HOME,
+   END,
+   PG_UP,
+   PG_DOWN,
+   TAB,
+   SHIFT_TAB,
+   F1,
+   F2,
+   F3,
+   F4,
+   F5,
+   F6,
+   F7,
+   F8,
+   F9,
+   F10,
+   F11,
+   F12,
+   ESC,
+   CTRL,
+   RETURN,
+   SPACE,
+   BACKSPACE,
+};
+
+enum EventType {
+   None,
+   Char,
+   Spec,
+   Mouse,
+};
+
+struct MouseEvent {
+   int x, y;
+   bool pressed;
+   int button;
+   int modifiers;
+};
+
+struct KeyEvent {
+   EventType type;
+      
+   unsigned char ch;
+   EscapeCodes escape;
+   MouseEvent mouse;
+
+   bool is_int() { return ch >= 0x30 && ch <= 0x39; }
+   int to_int() { return ch - 0x30; }
+   
+   bool in_range(int a, int b) {
+      auto c = to_int();
+      return c >= a && c <= b;
+   }
+};
 
 /* The input functions rely on the following termios parameters being set:
 	Non-canonical mode (c_lflags & ~(ICANON))
@@ -56,14 +122,17 @@ namespace Input {
 	//* Last entered key
 	extern deque<string> history;
 
+   std::optional<KeyEvent> try_get(const uint64_t timeout);
+
 	//* Poll keyboard & mouse input for <timeout> ms and return input availability as a bool
 	bool poll(const uint64_t timeout=0);
 
 	//* Get a key or mouse action from input
-	string get();
+   ///  REWRITE UNDERWAY
+   std::optional<KeyEvent> get();
 
 	//* Wait until input is available and return key
-	string wait();
+   std::optional<KeyEvent> wait();
 
 	//* Interrupt poll/wait
 	void interrupt();
@@ -72,6 +141,6 @@ namespace Input {
 	void clear();
 
 	//* Process actions for input <key>
-	void process(const string& key);
+	void process(std::optional<KeyEvent> key);
 
 }

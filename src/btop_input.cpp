@@ -24,6 +24,8 @@ tab-size = 4
 #include <signal.h>
 #include <sys/select.h>
 #include <utility>
+#include <iostream>
+#include <fstream>
 
 #include "btop_input.hpp"
 #include "btop_tools.hpp"
@@ -80,6 +82,44 @@ namespace Input {
 		{"[24~",	"f12"}
 	};
 
+   
+   const std::unordered_map<string, EscapeCodes> escape_chars = {
+      {"\033",	   EscapeCodes::ESC},
+		{"\x12",	   EscapeCodes::CTRL},
+		{"\n",		EscapeCodes::RETURN},
+		{" ",		   EscapeCodes::SPACE},
+		{"\x7f",	   EscapeCodes::BACKSPACE},
+		{"\x08",	   EscapeCodes::BACKSPACE},
+		{"[A", 		EscapeCodes::AR_UP},
+		{"[B", 		EscapeCodes::AR_DOWN},
+		{"[D", 		EscapeCodes::AR_LEFT},
+		{"[C", 		EscapeCodes::AR_RIGHT},
+		{"[2~",		EscapeCodes::INSERT},
+		{"[4h",		EscapeCodes::INSERT},
+		{"[3~",		EscapeCodes::DELETE},
+		{"[P",		EscapeCodes::DELETE},
+		{"[H",		EscapeCodes::HOME},
+		{"[1~",		EscapeCodes::HOME},
+		{"[F",		EscapeCodes::END},
+		{"[4~",		EscapeCodes::END},
+		{"[5~",		EscapeCodes::PG_UP},
+		{"[6~",		EscapeCodes::PG_DOWN},
+		{"\t",		EscapeCodes::TAB},
+		{"[Z",		EscapeCodes::SHIFT_TAB},
+		{"OP",		EscapeCodes::F1},
+		{"OQ",		EscapeCodes::F2},
+		{"OR",		EscapeCodes::F3},
+		{"OS",		EscapeCodes::F4},
+		{"[15~",	   EscapeCodes::F5},
+		{"[17~",	   EscapeCodes::F6},
+		{"[18~",	   EscapeCodes::F7},
+		{"[19~",	   EscapeCodes::F8},
+		{"[20~",	   EscapeCodes::F9},
+		{"[21~",	   EscapeCodes::F10},
+		{"[23~",	   EscapeCodes::F11},
+		{"[24~",	   EscapeCodes::F12} 
+   };
+
 	sigset_t signal_mask;
 	std::atomic<bool> polling (false);
 	array<int, 2> mouse_pos;
@@ -88,6 +128,13 @@ namespace Input {
 	deque<string> history(50, "");
 	string old_filter;
 	string input;
+
+   std::optional<KeyEvent> try_get(const uint64_t timeout) {
+      if (!poll(timeout)) {
+         return std::nullopt;
+      }
+      return get();
+   }
 
 	bool poll(const uint64_t timeout) {
 		atomic_lock lck(polling);
@@ -117,81 +164,96 @@ namespace Input {
 		return false;
 	}
 
-	string get() {
-		string key = input;
-		if (not key.empty()) {
-			//? Remove escape code prefix if present
-			if (key.substr(0, 2) == Fx::e) {
-				key.erase(0, 1);
-			}
-			//? Detect if input is an mouse event
-			if (key.starts_with("[<")) {
-				std::string_view key_view = key;
-				string mouse_event;
-				if (key_view.starts_with("[<0;") and key_view.find('M') != std::string_view::npos) {
-					mouse_event = "mouse_click";
-					key_view.remove_prefix(4);
+   
+
+   MouseEvent parse_mouse_event(const std::string& str) {
+      MouseEvent ev = {};
+
+      size_t s1 = str.find(';');
+      size_t s2 = str.find(';', s1 + 1);
+      size_t st = str.find_first_of("Mm");
+
+      if (s1 == string::npos || s2 == string::npos || st == string::npos) {
+         throw std::runtime_error("Invalid mouse sequence");
+      }
+
+      try {
+         int flags = std::stoi(str.substr(2, s1 - 2));
+         ev.button = flags & 0x3;
+         ev.modifiers = (flags >> 2) & 0x7;
+        
+         ev.x = std::stoi(str.substr(s1 + 1, s2 - s1 - 1));
+         ev.y = std::stoi(str.substr(s2 + 1, st - s2 - 1));
+         ev.pressed = (str)[st] == 'M';
+      } catch(const std::exception& e) {
+         throw std::runtime_error("Failed to parse mouse sequence");
+      }
+      return ev;
+   }
+
+   std::optional<KeyEvent> get() {
+      if (input.empty()) {
+         return std::nullopt;
+      }
+      std::string_view key(input);
+
+      if (key.starts_with("\x1b[")) {
+         key.remove_prefix(2); 
+         if (key.starts_with("[<")) {
+            try {
+               MouseEvent ev = parse_mouse_event(std::string{key});
+               return KeyEvent {
+                  .type = EventType::Mouse,
+                  .ch = 0x00,
+                  .escape = EscapeCodes::NONE,
+                  .mouse = ev
+               };
+            } catch (const std::exception& e) {
+               return std::nullopt;
+            }
+         }
+
+         if (escape_chars.find(std::string(key)) != escape_chars.end()) {
+            return KeyEvent {
+               .type = EventType::Spec,
+               .ch = 0x00,
+               .escape = escape_chars.at(std::string(key)),
+               .mouse = {}
+            };
+         }
+      }
+
+      if (key.length() == 1) {
+         unsigned char first = static_cast<unsigned char>(key[0]);
+         if (first >= 32 && first < 127) {
+            return KeyEvent {
+               .type = EventType::Char,
+               .ch = first,
+               .escape = EscapeCodes::NONE,
+               .mouse = {}
+            };
+         }
+      }
+      return std::nullopt;
+
+
+         /*if (g_CfgMgr.get<bool>("proc_filtering").v()) {
+				if (mouse_event == "mouse_click") return mouse_event;
+				else return "";
+			}*/
+
+			//? Get column and line position of mouse and check for any actions mapped to current position
+			/*for (const auto& [mapped_key, pos] : (Menu::active ? Menu::mouse_mappings : mouse_mappings)) {
+				if (col >= pos.col and col < pos.col + pos.width and line >= pos.line and line < pos.line + pos.height) {
+					key = mapped_key;
+					break;
 				}
-				// else if (key_view.starts_with("[<0;") and key_view.ends_with('m')) {
-				// 	mouse_event = "mouse_release";
-				// 	key_view.remove_prefix(4);
-				// }
-				else if (key_view.starts_with("[<64;")) {
-					mouse_event = "mouse_scroll_up";
-					key_view.remove_prefix(5);
-				}
-				else if (key_view.starts_with("[<65;")) {
-					mouse_event = "mouse_scroll_down";
-					key_view.remove_prefix(5);
-				}
-				else
-					key.clear();
+			}*/
 
-				if (g_CfgMgr.get<bool>("proc_filtering").value()) {
-					if (mouse_event == "mouse_click") return mouse_event;
-					else return "";
-				}
-
-				//? Get column and line position of mouse and check for any actions mapped to current position
-				if (not key.empty()) {
-					try {
-						const auto delim = key_view.find(';');
-						mouse_pos[0] = stoi((string)key_view.substr(0, delim));
-						mouse_pos[1] = stoi((string)key_view.substr(delim + 1, key_view.find('M', delim)));
-					}
-					catch (const std::invalid_argument&) { mouse_event.clear(); }
-					catch (const std::out_of_range&) { mouse_event.clear(); }
-
-					key = mouse_event;
-
-					if (key == "mouse_click") {
-						const auto& [col, line] = mouse_pos;
-
-						for (const auto& [mapped_key, pos] : (Menu::active ? Menu::mouse_mappings : mouse_mappings)) {
-							if (col >= pos.col and col < pos.col + pos.width and line >= pos.line and line < pos.line + pos.height) {
-								key = mapped_key;
-								break;
-							}
-						}
-					}
-				}
-
-			}
-			else if (Key_escapes.contains(key))
-				key = Key_escapes.at(key);
-			else if (ulen(key) > 1)
-				key.clear();
-
-			if (not key.empty()) {
-				history.push_back(key);
-				history.pop_front();
-			}
-		}
-		return key;
-	}
+   }
 
    /// TODO: Figure out where this shit's actually called, if at all
-	string wait() {
+   std::optional<KeyEvent> wait() {
 		while(not poll(std::numeric_limits<uint64_t>::max())) {}
 		return get();
 	}
@@ -204,33 +266,36 @@ namespace Input {
 		// do not need it, actually
 	}
 
-	void process(const string& key) {
-		if (key.empty()) return;
+	void process(std::optional<KeyEvent> key) {
+      if (!key.has_value()) return;
+
+		//if (key.empty()) return;
+      
+      /*
 		try {
-			auto filtering = Config::getB("proc_filtering");
-			auto vim_keys = Config::getB("vim_keys");
-			auto help_key = (vim_keys ? "H" : "h");
+         auto filtering = g_CfgMgr.get<CfgB>("proc_filtering").v();
+         auto vim_keys = g_CfgMgr.get<CfgB>("vim_keys").v();
+			
+         auto help_key = (vim_keys ? "H" : "h");
 			auto kill_key = (vim_keys ? "K" : "k");
-			//? Global input actions
-			if (not filtering) {
+			
+         //? Global input actions
+			if (filtering == false) {
 				bool keep_going = false;
-				if (str_to_lower(key) == "q") {
-					clean_quit(0);
-				}
-				else if (is_in(key, "escape", "m")) {
-					Menu::show(Menu::Menus::Main);
-					return;
-				}
-				else if (is_in(key, "F1", "?", help_key)) {
-					Menu::show(Menu::Menus::Help);
-					return;
-				}
-				else if (is_in(key, "F2", "o")) {
-					Menu::show(Menu::Menus::Options);
-					return;
-				}
-				else if (key.size() == 1 and isint(key)) {
-					auto intKey = stoi(key);
+            
+            if (key.ch == 'q' || key.ch == 'Q') {
+               clean_quit(0);
+            } else if (key.escape == EscapeCodes::ESC || key.ch == 'm') {
+               Menu::show(Menu::Menus::Main);
+               return;
+            } else if (key.escape == EscapeCodes::F1 || key.ch == '?') {
+               Menu::show(Menu::Menus::Help);
+               return;
+            } else if (key.escape == EscapeCodes::F2 || key.ch == 'o') {
+               Menu::show(Menu::Menus::Options);
+               return;
+            } else if (key.is_int()) {
+					auto intKey = key.to_int();
 				#ifdef GPU_SUPPORT
 					static const array<string, 10> boxes = {"gpu5", "cpu", "mem", "net", "proc", "gpu0", "gpu1", "gpu2", "gpu3", "gpu4"};
 					if ((intKey == 0 and Gpu::count < 5) or (intKey >= 5 and intKey - 4 > Gpu::count))
@@ -283,23 +348,22 @@ namespace Input {
 				bool no_update = true;
 				bool redraw = true;
 				if (filtering) {
-					if (key == "enter" or key == "down") {
-						Config::set("proc_filter", Proc::filter.text);
-						Config::set("proc_filtering", false);
+               if (key.escape == EscapeCodes::RETURN || key.escape == EscapeCodes::AR_DOWN) {
+                  g_CfgMgr.set<CfgS>("proc_filter", Proc::filter.text);
+                  g_CfgMgr.set<CfgB>("filtering", false);
 						old_filter.clear();
-						if(key == "down"){
-							process("down");
+						if(key.escape == EscapeCodes::AR_DOWN){
+							process(key);
 							return;
 						}
-					}
-					else if (key == "escape" or key == "mouse_click") {
-						Config::set("proc_filter", old_filter);
-						Config::set("proc_filtering", false);
+					} else if (key.escape == EscapeCodes::ESC || (key.type == EventType::Mouse && key.mouse.button == 0 && key.mouse.pressed)) {
+						g_CfgMgr.set<CfgS>("proc_filter", old_filter);
+						g_CfgMgr.set<CfgB>("proc_filtering", false);
 						old_filter.clear();
 					}
 					else if (Proc::filter.command(key)) {
-						if (Config::getS("proc_filter") != Proc::filter.text)
-							Config::set("proc_filter", Proc::filter.text);
+						if (g_CfgMgr.get<CfgS>("proc_filter").v() != Proc::filter.text)
+							g_CfgMgr.set<CfgS>("proc_filter", Proc::filter.text);
 					}
 					else
 						return;
@@ -444,19 +508,21 @@ namespace Input {
 				bool redraw = true;
 				static uint64_t last_press = 0;
 
-				if (key == "+" and Config::getI("update_ms") <= 86399900) {
-					int add = (Config::getI("update_ms") <= 86399000 and last_press >= time_ms() - 200
+            auto update_ms = g_CfgMgr.get<CfgI>("update_ms").v();
+
+				if (key == "+" && update_ms <= 86399900) {
+					int add = (update_ms <= 86399000 and last_press >= time_ms() - 200
 						and rng::all_of(Input::history, [](const auto& str){ return str == "+"; })
 						? 1000 : 100);
-					Config::set("update_ms", Config::getI("update_ms") + add);
+					g_CfgMgr.set<CfgI>("update_ms", update_ms + add);
 					last_press = time_ms();
 					redraw = true;
 				}
-				else if (key == "-" and Config::getI("update_ms") >= 200) {
-					int sub = (Config::getI("update_ms") >= 2000 and last_press >= time_ms() - 200
+				else if (key == "-" && update_ms >= 200) {
+					int sub = (update_ms >= 2000 and last_press >= time_ms() - 200
 						and rng::all_of(Input::history, [](const auto& str){ return str == "-"; })
 						? 1000 : 100);
-					Config::set("update_ms", Config::getI("update_ms") - sub);
+					g_CfgMgr.set<CfgI>("update_ms", update_ms - sub);
 					last_press = time_ms();
 					redraw = true;
 				}
@@ -543,6 +609,8 @@ namespace Input {
 		catch (const std::exception& e) {
 			throw std::runtime_error("Input::process(\"" + key + "\") : " + string{e.what()});
 		}
-	}
 
+	}
+      */
+}
 }

@@ -87,7 +87,7 @@ namespace Menu {
 	};
 
 	//* Handles redirection of input for menu functions and handles return codes
-	void process(string key="");
+	void process(std::optional<KeyEvent> key = std::nullopt);
 
 	//* Show a menu from enum Menu::Menus
 	void show(int menu, int signal=-1);

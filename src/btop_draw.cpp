@@ -127,7 +127,7 @@ namespace Draw {
 		if (redraw) banner.clear();
 		if (banner.empty()) {
 			string b_color, bg, fg, oc, letter;
-         auto lowcolor = g_CfgMgr.get<CfgBool>("lowcolor").value();
+         auto lowcolor = g_CfgMgr.get<CfgB>("lowcolor").v();
          auto tty_mode = Config::getB("tty_mode");
 			for (size_t z = 0; const auto& line : Global::Banner_src) {
 				if (const auto w = ulen(line[1]); w > width) width = w;
@@ -603,7 +603,7 @@ namespace Cpu {
 			out += Mv::to(button_y, x + 16) + title_left + Theme::c("hi_fg") + Fx::b + 'p' + Theme::c("title") + "reset "
 				+ (Config::current_preset < 0 ? "*" : to_string(Config::current_preset)) + Fx::ub + title_right;
 			Input::mouse_mappings["p"] = {button_y, x + 17, 1, 8};
-			const string update = to_string(Config::getI("update_ms")) + "ms";
+			const string update = to_string(g_CfgMgr.get<CfgI>("update_ms").v()) + "ms";
 			out += Mv::to(button_y, x + width - update.size() - 8) + title_left + Fx::b + Theme::c("hi_fg") + "- " + Theme::c("title") + update
 				+ Theme::c("hi_fg") + " +" + Fx::ub + title_right;
 			Input::mouse_mappings["-"] = {button_y, x + width - (int)update.size() - 7, 1, 2};
@@ -743,7 +743,7 @@ namespace Cpu {
 				const string str_percent = to_string(percent) + '%';
 				const string str_watts = (watts != -1 and Config::getB("show_battery_watts") ? fmt::format("{:.2f}", watts) + 'W' : "");
 				const auto& bat_symbol = bat_symbols.at((bat_symbols.contains(status) ? status : "unknown"));
-				const int current_len = (Term::width >= 100 ? 11 : 0) + str_time.size() + str_percent.size() + str_watts.size() + to_string(Config::getI("update_ms")).size();
+				const int current_len = (Term::width >= 100 ? 11 : 0) + str_time.size() + str_percent.size() + str_watts.size() + to_string(g_CfgMgr.get<CfgI>("update_ms").v()).size();
 				const int current_pos = Term::width - current_len - 17;
 
 				if ((bat_pos != current_pos or bat_len != current_len) and bat_pos > 0 and not redraw)
@@ -1563,7 +1563,7 @@ namespace Proc {
 		if (Runner::stopping) return "";
 		auto proc_tree = Config::getB("proc_tree");
 		bool show_detailed = (Config::getB("show_detailed") and cmp_equal(Proc::detailed.last_pid, Config::getI("detailed_pid")));
-		bool proc_gradient = (Config::getB("proc_gradient") and not g_CfgMgr.get<CfgBool>("lowcolor").value() and Theme::gradients.contains("proc"));
+		bool proc_gradient = (Config::getB("proc_gradient") and not g_CfgMgr.get<CfgB>("lowcolor").v() and Theme::gradients.contains("proc"));
 		auto proc_colors = Config::getB("proc_colors");
 		auto tty_mode = Config::getB("tty_mode");
 		auto& graph_symbol = (tty_mode ? "tty" : Config::getS("graph_symbol_proc"));

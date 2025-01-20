@@ -233,7 +233,28 @@ void argumentParser(const int argc, char **argv) {
 	}
 }
 
-//* Handler for SIGWINCH and general resizing events, does nothing if terminal hasn't been resized unless force=true
+class ResizeInputHandler {
+public:
+   enum class Action {
+      None,
+      Quit,
+      BoxToggled,
+   };
+
+   Action handle_input() {
+      auto key_opt = Input::get();
+      if (!key_opt || key_opt.value().type != EventType::Char) {
+         return Action::None;
+      }
+      auto key = key_opt.value();
+
+      if (key.ch == 'q') return Action::Quit;
+      if (key.is_int() && key.in_range(1, 4)) {
+
+      }
+   }
+};
+
 void term_resize(bool force) {
 	static atomic<bool> resizing (false);
 	if (Input::polling) {
@@ -282,26 +303,19 @@ void term_resize(bool force) {
 						"minHeight"_a = minHeight
 			) << std::flush;
 
-			bool got_key = false;
-			for (; not Term::refresh() and not got_key; got_key = Input::poll(10));
-			if (got_key) {
-				auto key = Input::get();
-				if (key == "q")
-					clean_quit(0);
-				else if (key.size() == 1 and isint(key)) {
-					auto intKey = stoi(key);
-				#ifdef GPU_SUPPORT
-					if ((intKey == 0 and Gpu::count >= 5) or (intKey >= 5 and intKey - 4 <= Gpu::count)) {
-				#else
-					if (intKey > 0 and intKey < 5) {
-				#endif
-						auto box = all_boxes.at(intKey);
-						Config::current_preset = -1;
-						Config::toggle_box(box);
-						boxes = Config::getS("shown_boxes");
-					}
-				}
-			}
+         std::optional<KeyEvent> k_opt;
+         for (; !Term::refresh() && !k_opt.has_value(); k_opt = Input::try_get(10));
+         if (k_opt.has_value()) {
+            auto key = k_opt.value();
+            if (key.ch == 'q') {
+               clean_quit(0);
+            } else if (key.is_int() && key.in_range(1, 4)) {
+               auto box = all_boxes.at(key.to_int());
+               Config::current_preset = -1;
+               Config::toggle_box(box);
+               boxes = Config::getS("shown_boxes");
+            }
+         }
 			min_size = Term::get_min_size(boxes);
 			minWidth = min_size.at(0), minHeight = min_size.at(1);
 		}
@@ -422,9 +436,6 @@ void init_config(){
 	atomic_lock lck(Global::init_conf);
    
    g_CfgMgr.load();
-	(void)g_CfgMgr.set<CfgBool>("lowcolor", Global::arg_low_color 
-         ? true 
-         : !g_CfgMgr.get<CfgBool>("truecolor").value());
 
 	static bool first_init = true;
 
@@ -861,8 +872,8 @@ namespace Runner {
 			current_conf = {
 				(box == "all" ? Config::current_boxes : vector{box}),
 				no_update, force_redraw,
-				(!g_CfgMgr.get<CfgBool>("tty_mode").value()
-             && g_CfgMgr.get<CfgBool>("background_update").value()),
+				(!g_CfgMgr.get<CfgB>("tty_mode").v()
+             && g_CfgMgr.get<CfgB>("background_update").v()),
 				Global::overlay,
 				Global::clock
 			};
@@ -915,6 +926,7 @@ int main(int argc, char **argv) {
    }
    g_CfgMgr.load();
 
+   g_CfgMgr.set<CfgI>("update_ms", 300);
 	//? ------------------------------------------------ INIT ---------------------------------------------------------
    
 	Global::start_time = time_s();
@@ -1054,7 +1066,7 @@ int main(int argc, char **argv) {
 	}
 
 	if (Term::current_tty != "unknown") Logger::info("Running on " + Term::current_tty);
-	if (not Global::arg_tty && g_CfgMgr.get<CfgBool>("force_tty").value()) {
+	if (not Global::arg_tty && g_CfgMgr.get<CfgB>("force_tty").v()) {
 		Config::set("tty_mode", true);
 		Logger::info("Forcing tty mode: setting 16 color mode and using tty friendly graph symbols");
 	}
@@ -1087,7 +1099,7 @@ int main(int argc, char **argv) {
 		clean_quit(1);
 	}
 
-	if (!Config::set_boxes(g_CfgMgr.get<CfgString>("shown_boxes").value())) {
+	if (!Config::set_boxes(g_CfgMgr.get<CfgS>("shown_boxes").v())) {
 		Config::set_boxes("cpu mem net proc");
 		Config::set("shown_boxes", "cpu mem net proc"s);
 	}
@@ -1149,7 +1161,7 @@ int main(int argc, char **argv) {
 	if (Global::arg_update != 0) {
 		Config::set("update_ms", Global::arg_update);
 	}
-	uint64_t update_ms = g_CfgMgr.get<CfgInt>("update_ms").value();
+	uint64_t update_ms = g_CfgMgr.get<CfgI>("update_ms").v();
 	auto future_time = time_ms();
 
 	try {
@@ -1198,7 +1210,7 @@ int main(int argc, char **argv) {
 			//? Start secondary collect & draw thread at the interval set by <update_ms> config value
 			if (time_ms() >= future_time and not Global::resized) {
 				Runner::run("all");
-				update_ms = Config::getI("update_ms");
+				update_ms = g_CfgMgr.get<CfgI>("update_ms").v();
 				future_time = time_ms() + update_ms;
 			}
 
@@ -1206,8 +1218,9 @@ int main(int argc, char **argv) {
 			for (auto current_time = time_ms(); current_time < future_time; current_time = time_ms()) {
 
 				//? Check for external clock changes and for changes to the update timer
-				if (std::cmp_not_equal(update_ms, Config::getI("update_ms"))) {
-					update_ms = Config::getI("update_ms");
+            auto tmp = g_CfgMgr.get<CfgI>("update_ms").v();
+				if (std::cmp_not_equal(update_ms, tmp)) {
+					update_ms = tmp;
 					future_time = time_ms() + update_ms;
 				}
 				else if (future_time - current_time > update_ms) {

@@ -56,7 +56,7 @@ static std::string trim_str(std::string str) {
 }
 ///////////////////////////////////////////////////////////////////////////////
 
-CfgManager g_CfgMgr("conf.ini");
+CfgManager g_CfgMgr("/home/snow/.config/btop/btop.ini2");
 
 CfgManager::CfgManager(const std::string& cfg_path) {
    cfg_file = std::filesystem::path(cfg_path);
@@ -105,23 +105,26 @@ bool CfgManager::load() {
          continue;
       }
 
+      std::cout << "K: " << k << " V: " << v << std::endl;
+
       auto it = cfg_keys.find(k);
-      CfgResult<bool> result = [this, &k, &v, type = it->second.type]() -> CfgResult<bool> {
+      DynResult<bool> result = 
+         [this, &k, &v, type = it->second.type]() -> DynResult<bool> {
          switch(type) {
             case CString:
-               return try_set<CfgString>(k, v);
+               return try_set<CfgS>(k, v);
             case CBool:
-               return try_set<CfgBool>(k, v);
+               return try_set<CfgB>(k, v);
             case CInt:
-               return try_set<CfgInt>(k, v);
+               return try_set<CfgI>(k, v);
             default:
-               return CfgResult<bool>("Unknown configuration type");
+               return DynResult<bool>::Err("Unknown configuration type");
          }
       }();
 
-      if (result.is_error()) {
+      if (result.is_err()) {
          std::cerr << "Error on line " << line_num << ": "
-            << result.error() << " (key: " << k << ", val: " << v << ")"
+            << result.e() << " (key: " << k << ", val: " << v << ")"
             << std::endl;
          tainted = true;
       }
@@ -133,23 +136,24 @@ bool CfgManager::init() {
    bool success = true;
 
    for (const auto& [k, i] : cfg_keys) {
-      auto set_result = std::visit([this, &k](const auto& def) -> CfgResult<bool> {
+      auto set_result = 
+         std::visit([this, &k](const auto& def) -> DynResult<bool> {
          using T = std::decay_t<decltype(def)>;
                 
-         if constexpr (std::is_same_v<T, CfgString>) {
-            return set<CfgString>(k, def);
-         } else if constexpr (std::is_same_v<T, CfgBool>) {
-            return set<CfgBool>(k, def);
-         } else if constexpr (std::is_same_v<T, CfgInt>) {
-            return set<CfgInt>(k, def);
+         if constexpr (std::is_same_v<T, CfgS>) {
+            return set<CfgS>(k, def);
+         } else if constexpr (std::is_same_v<T, CfgB>) {
+            return set<CfgB>(k, def);
+         } else if constexpr (std::is_same_v<T, CfgI>) {
+            return set<CfgI>(k, def);
          } else {
-            return CfgResult<bool>("Unsupported configuration type");
+            return DynResult<bool>::Err("Unsupported configuration type");
          }
       }, i.def);
 
-      if (set_result.is_error()) {
+      if (set_result.is_err()) {
          std::cerr << "Error setting default value for key '" << k
-                   << "': " << set_result.error() << '\n';
+                   << "': " << set_result.e() << '\n';
          success = false;
       }
    }

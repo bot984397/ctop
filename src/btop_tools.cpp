@@ -400,7 +400,7 @@ namespace Tools {
 	string floating_humanizer(uint64_t value, bool shorten, size_t start, bool bit, bool per_second) {
 		string out;
 		const size_t mult = (bit) ? 8 : 1;
-		bool mega = g_CfgMgr.get<bool>("base_10_sizes").value();
+		bool mega = g_CfgMgr.get<CfgB>("base_10_sizes").v();
 
 		// taking advantage of type deduction for array creation (since C++17)
 		// combined with string literals (operator""s)
@@ -511,7 +511,7 @@ namespace Tools {
 	}
 
 	void atomic_wait(const atomic<bool>& atom, bool old) noexcept {
-		while (atom.load(std::memory_order_relaxed) == old ) bsy_wait();
+		while (atom.load(std::memory_order_relaxed) == old ) busy_wait();
 	}
 
 	void atomic_wait_for(const atomic<bool>& atom, bool old, const uint64_t wait_ms) noexcept {

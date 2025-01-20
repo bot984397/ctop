@@ -794,8 +794,8 @@ namespace Menu {
 	msgBox::msgBox() {}
 	msgBox::msgBox(int width, int boxtype, vector<string> content, string title)
 	: width(width), boxtype(boxtype) {
-      auto tty_mode = g_CfgMgr.get<CfgBool>("tty_mode").value();
-      auto rounded = g_CfgMgr.get<CfgBool>("rounded_corners").value();
+      auto tty_mode = g_CfgMgr.get<CfgB>("tty_mode").v();
+      auto rounded = g_CfgMgr.get<CfgB>("rounded_corners").v();
 		const auto& right_up = (tty_mode or not rounded ? Symbols::right_up : Symbols::round_right_up);
 		const auto& left_up = (tty_mode or not rounded ? Symbols::left_up : Symbols::round_left_up);
 		const auto& right_down = (tty_mode or not rounded ? Symbols::right_down : Symbols::round_right_down);
@@ -1617,7 +1617,8 @@ namespace Menu {
 	};
 	bitset<8> menuMask;
 
-	void process(string key) {
+	void process(std::optional<KeyEvent> key) {
+      /*
 		if (menuMask.none()) {
 			Menu::active = false;
 			Global::overlay.clear();
@@ -1675,4 +1676,6 @@ namespace Menu {
 		signalToSend = signal;
 		process();
 	}
+   */
+      }
 }

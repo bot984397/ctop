@@ -27,64 +27,19 @@ tab-size = 4
 #include <algorithm>
 #include <unordered_map>
 
+#include "btop_shared.hpp"
+
 using std::string;
+using std::string_view;
 using std::vector;
 
-using CfgString = std::string;
-using CfgBool = bool;
-using CfgInt = int;
+using CfgS = std::string;
+using CfgB = bool;
+using CfgI = int;
 
 class CfgError : public std::runtime_error {
 public:
    explicit CfgError(const std::string& err) : std::runtime_error(err) {}
-};
-
-template <typename T>
-class CfgResult {
-private:
-   std::variant<T, std::string> result;
-public:
-   explicit CfgResult(const T& val) : result(val) {}
-   explicit CfgResult(const std::string& err) : result(err) {}
-
-   bool is_error() const { 
-      return std::holds_alternative<std::string>(result);
-   }
-   const T& value() const {
-      return std::get<T>(result);
-   }
-   const std::string& error() const {
-      return std::get<std::string>(result);
-   }
-};
-
-template <>
-class CfgResult<std::string> {
-private:
-   enum class Tag { Value, Error };
-   std::variant<std::string, Tag> result;
-
-public:
-   explicit CfgResult(const std::string& val) : result(val) {}
-   explicit CfgResult(const char* /*err*/) : result(Tag::Error) {}
-
-   bool is_error() const {
-      return std::holds_alternative<Tag>(result);
-   }
-
-   const std::string& value() const {
-      if (is_error()) {
-         throw std::runtime_error("No value available in error state.");
-      }
-      return std::get<std::string>(result);
-   }
-
-   const std::string error() const {
-      if (!is_error()) {
-         throw std::runtime_error("No error available in value state.");
-      }
-      return std::string("Error occurred");  // or return the actual error message if applicable
-   }
 };
 
 template<typename T>
@@ -92,45 +47,40 @@ class CfgStore {
 private:
    std::unordered_map<std::string_view, T> active;
    std::unordered_map<std::string_view, T> temp;
-
    using CfgValidator = std::function<bool(const T&)>;
    std::unordered_map<std::string_view, CfgValidator> validators;
 public:
    CfgStore() = default;
    CfgStore(CfgStore&&) = default;
    CfgStore& operator=(CfgStore&&) = default;
-
    CfgStore(const CfgStore&) = delete;
    CfgStore& operator=(const CfgStore&) = delete;
 
-   [[nodiscard]] CfgResult<T> get(const std::string_view key) const {
-      try {
-         return CfgResult<T>(active.at(key));
-      } catch (const std::out_of_range&) {
-         return CfgResult<T>("Config key not found: " + std::string(key));
+   [[nodiscard]] DynResult<T> get(const std::string_view key) const {
+      auto it = active.find(key);
+      if (it == active.end()) {
+         return DynResult<T>::Err("Config key not found: " + string(key));
       }
+      return DynResult<T>(it->second);
    }
 
-   [[nodiscard]] CfgResult<bool> set(const std::string_view key, const T& val) {
+   [[nodiscard]] DynResult<bool> set(const string_view key, const T& val) {
+      std::cout << "validator: " << key << " : " << val << std::endl;
       auto validator_it = validators.find(key);
-      if (validator_it != validators.end()) {
-         if (!validator_it->second(val)) {
-            return CfgResult<bool>("Validation failed for key: " + std::string(key));
-         }
+      if (validator_it != validators.end() && !validator_it->second(val)) {
+         return DynResult<bool>::Err("Failed to validate value: " + val);
       }
       active[key] = val;
-      return CfgResult<bool>(true);
+      return DynResult<bool>(true);
    }
 
-   [[nodiscard]] CfgResult<bool> stage(const std::string_view key, const T& val) {
+   [[nodiscard]] DynResult<bool> stage(const string_view key, const T& val) {
       auto validator_it = validators.find(key);
-      if (validator_it != validators.end()) {
-         if (!validator_it->second(val)) {
-            return CfgResult<bool>("Validation failed for key: " + std::string(key));
-         }
+      if (validator_it != validators.end() && !validator_it->second(val)) {
+         return DynResult<bool>::Err("Failed to validate value: " + val);
       }
       temp[key] = val;
-      return CfgResult<bool>(true);
+      return DynResult<bool>(true);
    }
 
    void add_validator(const std::string_view key, CfgValidator validator) {
@@ -155,7 +105,7 @@ using CfgType::CString;
 using CfgType::CInt;
 using CfgType::CBool;
 
-using CfgVal = std::variant<CfgString, CfgBool, CfgInt>;
+using CfgVal = std::variant<CfgS, CfgB, CfgI>;
 
 struct CfgItem {
    CfgType type;
@@ -164,9 +114,9 @@ struct CfgItem {
 
 class CfgManager {
 private:
-   CfgStore<CfgString> string_store;
-   CfgStore<CfgBool> bool_store;
-   CfgStore<CfgInt> int_store;
+   CfgStore<CfgS> string_store;
+   CfgStore<CfgB> bool_store;
+   CfgStore<CfgI> int_store;
 
    std::unordered_map<std::string, CfgItem> cfg_keys = {
       {"color_theme",         {CString, "Default"}},
@@ -266,55 +216,54 @@ private:
    };
 
    void setup_validators() {
-      /// Graph symbol validation
       string_store.add_validator("graph_symbol", [this](const std::string& val) {
          return std::ranges::find(valid_graph_symbols, val) != valid_graph_symbols.end();
       });
+      int_store.add_validator("update_ms", [this](const int val) {
+         return val >= 100 && val <= 2000;
+      });
    }
 
-   CfgResult<bool> try_parse_bool(const std::string& val) {
+   DynResult<bool> try_parse_bool(const std::string& val) {
       std::string lower = val;
       std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
 
       if (lower == "true" || lower == "1" || lower == "yes") {
-         return CfgResult<bool>(true);
+         return DynResult<bool>(true);
       } else if (lower == "false" || lower == "0" || lower == "no") {
-         return CfgResult<bool>(false);
+         return DynResult<bool>(false);
       }
-      return CfgResult<bool>("Invalid boolean value: " + val);
+      return DynResult<bool>::Err("Invalid boolean value: " + val);
    }
 
-   CfgResult<int> try_parse_int(const std::string& val) {
+   DynResult<int> try_parse_int(const std::string& val) {
       try {
          size_t pos;
          int res = std::stoi(val, &pos);
          if (pos != val.length()) {
-            return CfgResult<int>("Invalid integer value: " + val);
+            return DynResult<int>::Err("Invalid integer value: " + val);
          }
-         return CfgResult<int>(res);
+         std::cout << "parsed int: " << std::endl;
+         return DynResult<int>(res);
       } catch (const std::exception&) {
-         return CfgResult<int>("Invalid integer value: " + val);
+         return DynResult<int>::Err("Invalid integer value: " + val);
       }
    }
 
    template<typename T>
-   CfgResult<bool> try_set(const std::string& key, const std::string& val) {
-      if constexpr (std::is_same_v<T, CfgString>) {
-         return set<CfgString>(key, val);
-      } else if constexpr (std::is_same_v<T, CfgBool>) {
-         auto im = try_parse_bool(val);
-         if (im.is_error()) {
-            return CfgResult<bool>(im.error());
-         }
-         return set<CfgBool>(key, im.value());
-      } else if constexpr (std::is_same_v<T, CfgInt>) {
-         auto im = try_parse_int(val);
-         if (im.is_error()) {
-            return CfgResult<bool>(im.error());
-         }
-         return set<CfgInt>(key, im.value());
+   DynResult<bool> try_set(const std::string& key, const std::string& val) {
+      if constexpr (std::is_same_v<T, CfgS>) {
+         return set<CfgS>(key, val);
+      } else if constexpr (std::is_same_v<T, CfgB>) {
+         return try_parse_bool(val).and_then([this, &key](bool parsed) {
+            return set<CfgB>(key, parsed);
+         });
+      } else if constexpr (std::is_same_v<T, CfgI>) {
+         return try_parse_int(val).and_then([this, &key](bool parsed) {
+            return set<CfgI>(key, parsed);
+         });
       }
-      return CfgResult<bool>("Unsupported type");
+      return DynResult<bool>::Err("Unsupported type");
    }
 
    std::filesystem::path cfg_dir;
@@ -357,12 +306,12 @@ public:
    bool init();
 
    template<typename T>
-   [[nodiscard]] CfgResult<T> get(const std::string_view key) const {
-      if constexpr (std::is_same_v<T, CfgString>) {
+   [[nodiscard]] DynResult<T> get(const std::string_view key) const {
+      if constexpr (std::is_same_v<T, CfgS>) {
          return string_store.get(key);
-      } else if constexpr (std::is_same_v<T, CfgBool>) {
+      } else if constexpr (std::is_same_v<T, CfgB>) {
          return bool_store.get(key);
-      } else if constexpr (std::is_same_v<T, CfgInt>) {
+      } else if constexpr (std::is_same_v<T, CfgI>) {
          return int_store.get(key);
       } else {
          static_assert(always_false<T>, "Invalid configuration type");
@@ -370,12 +319,12 @@ public:
    }
 
    template<typename T>
-   [[nodiscard]] CfgResult<bool> set(const std::string_view key, const T& val) {
-      if constexpr (std::is_same_v<T, CfgString>) {
+   [[nodiscard]] DynResult<bool> set(const std::string_view key, const T& val) {
+      if constexpr (std::is_same_v<T, CfgS>) {
          return string_store.set(key, val);
-      } else if constexpr (std::is_same_v<T, CfgBool>) {
+      } else if constexpr (std::is_same_v<T, CfgB>) {
          return bool_store.set(key, val);
-      } else if constexpr (std::is_same_v<T, CfgInt>) {
+      } else if constexpr (std::is_same_v<T, CfgI>) {
          return int_store.set(key, val);
       } else {
          static_assert(always_false<T>, "Invalid configuration type");
@@ -386,7 +335,7 @@ public:
    static constexpr bool always_false = false;
    
    void flip(std::string_view key) {
-      (void)bool_store.set(key, !bool_store.get(key).value());
+      (void)bool_store.set(key, !bool_store.get(key).v());
    }
 
    [[nodiscard]] bool set_boxes(const std::string& boxes);
